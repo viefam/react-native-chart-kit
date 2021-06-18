@@ -19,6 +19,7 @@ export interface AbstractChartProps {
 export interface AbstractChartConfig extends ChartConfig {
   count?: number;
   data?: Dataset[];
+  dataX?: Dataset[];
   width?: number;
   height?: number;
   paddingTop?: number;
@@ -36,14 +37,24 @@ export interface AbstractChartConfig extends ChartConfig {
 export type AbstractChartState = {};
 
 export const DEFAULT_X_LABELS_HEIGHT_PERCENTAGE = 0.75;
-
+const labelTextColor= "#2D001A"
 class AbstractChart<
   IProps extends AbstractChartProps,
   IState extends AbstractChartState
 > extends Component<AbstractChartProps & IProps, AbstractChartState & IState> {
   calcScaler = (data: number[]) => {
     if (this.props.fromZero) {
-      return Math.max(...data, 0) - Math.min(...data, 0) || 1;
+      // tinh toan gia tri lon nhat lam tron 
+      let count = Math.min(...data) === Math.max(...data) ? 1 : 4;
+      const maxValue = Math.max(...data,0)
+      const averageValue = Math.round(maxValue/count);
+      const tenCount = Math.pow(10, `${averageValue}`.length - 1)
+      const averageValueData = Math.ceil(averageValue/tenCount)  * tenCount
+      let maxValueData = averageValueData * count 
+      //check lại nếu làm tròn thừa
+      const distance = (maxValueData - maxValue)/averageValueData
+      if(distance> 1) maxValueData = maxValueData - Math.floor(distance) * averageValueData
+      return maxValueData - Math.min(...data, 0) || 1;
     } else if (this.props.fromNumber) {
       return (
         Math.max(...data, this.props.fromNumber) -
@@ -84,10 +95,9 @@ class AbstractChart<
   };
 
   getPropsForBackgroundLines() {
-    const { propsForBackgroundLines = {} } = this.props.chartConfig;
+    const { propsForBackgroundLines = {},gridLineColor } = this.props.chartConfig;
     return {
-      stroke: this.props.chartConfig.color(0.2),
-      strokeDasharray: "5, 10",
+      stroke: gridLineColor,
       strokeWidth: 1,
       ...propsForBackgroundLines
     };
@@ -97,11 +107,10 @@ class AbstractChart<
     const {
       propsForLabels = {},
       color,
-      labelColor = color
     } = this.props.chartConfig;
     return {
       fontSize: 12,
-      fill: labelColor(0.8),
+      fill: labelTextColor,
       ...propsForLabels
     };
   }
@@ -110,10 +119,10 @@ class AbstractChart<
     const {
       propsForVerticalLabels = {},
       color,
-      labelColor = color
     } = this.props.chartConfig;
     return {
-      fill: labelColor(0.8),
+      fill: labelTextColor,
+      fontSize: 12,
       ...propsForVerticalLabels
     };
   }
@@ -122,10 +131,9 @@ class AbstractChart<
     const {
       propsForHorizontalLabels = {},
       color,
-      labelColor = color
     } = this.props.chartConfig;
     return {
-      fill: labelColor(0.8),
+      fill: labelTextColor,
       ...propsForHorizontalLabels
     };
   }
@@ -201,15 +209,33 @@ class AbstractChart<
 
       if (count === 1) {
         yLabel = `${yAxisLabel}${formatYLabel(
-          data[0].toFixed(decimalPlaces)
+          Number(data[0]).toFixed(decimalPlaces)
         )}${yAxisSuffix}`;
       } else {
+        //convert to K or M unit
+        const kZeroCount = 3;
+        const mZeroCount = 6;
+        const minValue = this.calcScaler(data) / count;
+        let resultZeroCount=  0;
+        let zeroUnit = ""
+        if(minValue / Math.pow(10,mZeroCount) > 1){
+          //convert To M
+          resultZeroCount = mZeroCount
+          zeroUnit = "m"
+        } else{
+          if(minValue / Math.pow(10,kZeroCount) > 1){
+            //convert To M
+            resultZeroCount = kZeroCount
+            zeroUnit = "k"
+          }
+        }
+
         const label = this.props.fromZero
-          ? (this.calcScaler(data) / count) * i + Math.min(...data, 0)
-          : (this.calcScaler(data) / count) * i + Math.min(...data);
+          ? (this.calcScaler(data) / (count*Math.pow(10,resultZeroCount))) * i + Math.min(...data, 0)
+          : (this.calcScaler(data) / (count*Math.pow(10,resultZeroCount))) * i + Math.min(...data);
         yLabel = `${yAxisLabel}${formatYLabel(
           label.toFixed(decimalPlaces)
-        )}${yAxisSuffix}`;
+        )}${yAxisSuffix}${label !== 0 ? zeroUnit :""}`;
       }
 
       const basePosition = height * verticalLabelsHeightPercentage;
@@ -219,7 +245,7 @@ class AbstractChart<
           ? paddingTop + 4
           : height * verticalLabelsHeightPercentage -
             (basePosition / count) * i +
-            paddingTop;
+            paddingTop + 4 ;
       return (
         <Text
           rotation={horizontalLabelRotation}
@@ -266,7 +292,6 @@ class AbstractChart<
       xLabelsOffset = 0,
       hidePointsAtIndex = []
     } = this.props;
-
     const fontSize = 12;
 
     let fac = 1;
@@ -279,12 +304,11 @@ class AbstractChart<
         return null;
       }
 
-      const x =
-        (((width - paddingRight) / labels.length) * i +
+      let x =
+      labels.length > 1 ?  (((width - paddingRight) / (labels.length-1)) * i +
           paddingRight +
           horizontalOffset) *
-        fac;
-
+        fac : 0;
       const y =
         height * verticalLabelsHeightPercentage +
         paddingTop +
@@ -328,21 +352,17 @@ class AbstractChart<
     "data"
   > & { data: number[] }) => {
     const { yAxisInterval = 1 } = this.props;
-
-    return [...new Array(Math.ceil(data.length / yAxisInterval))].map(
+    // add -1 for the first vertical line
+    return [0,100].map(
       (_, i) => {
+        const cx = paddingRight + ( _/100 * (width - paddingRight));
+         
         return (
           <Line
             key={Math.random()}
-            x1={Math.floor(
-              ((width - paddingRight) / (data.length / yAxisInterval)) * i +
-                paddingRight
-            )}
-            y1={0}
-            x2={Math.floor(
-              ((width - paddingRight) / (data.length / yAxisInterval)) * i +
-                paddingRight
-            )}
+            x1={cx}
+            y1={paddingTop}
+            x2={cx}
             y2={height * verticalLabelsHeightPercentage + paddingTop}
             {...this.getPropsForBackgroundLines()}
           />
